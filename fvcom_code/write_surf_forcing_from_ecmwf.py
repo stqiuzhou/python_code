@@ -9,8 +9,9 @@ from fvcom_tools_packages.fvcom_prep import FvcomPrep
 from fvcom_tools_packages.utily import PassiveStore
 import os
 import matplotlib.dates as pltdate
-from datetime import datetime
-
+"""
+    功能：表面强迫的nc输入，包括风场和气压场，数据来源ECMWF。
+"""
 # 列出需要读取ecmwf数据的路径
 ecmwf_wind_dir = r'E:\ecmwf\wind\1993'
 ecmwf_wind_files = os.listdir(ecmwf_wind_dir)
@@ -38,6 +39,7 @@ ptime = pltdate.num2date(ecmwf_data.time, tz=None)
 
 # 网格数据路径
 grid_path = r'H:\fvcom\fvcom_input_file\sms.2dm'
+# 表面强迫的nc输出
 prep = FvcomPrep(grid_path)
 interped_data = prep.interp_surface_forcing(ecmwf_data)
 prep.write_surface_forcing(r'H:\fvcom\fvcom_input_file\ecmwf_08_10.nc',
