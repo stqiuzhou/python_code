@@ -24,10 +24,10 @@ select_ecmwf_slp_path = [os.path.join(ecmwf_slp_dir, x) for x in ecmwf_slp_files
 # 读取数据
 ecmwf_wind_data = ReadData(select_ecmwf_wind_path, types='ecmwf',
                       variables=['lon','lat', 'time', 'wind'],
-                      extents=[5, 40, 105, 135])
+                      extents=[105, 135, 5, 40])
 ecmwf_slp_data = ReadData(select_ecmwf_slp_path, types='ecmwf',
                           variables=['time', 'slp'],
-                          extents=[5, 40, 105, 135])
+                          extents=[105, 135, 5, 40])
 ecmwf_data = PassiveStore()
 setattr(ecmwf_data, 'lon', ecmwf_wind_data.data.lon)
 setattr(ecmwf_data, 'lat', ecmwf_wind_data.data.lat)

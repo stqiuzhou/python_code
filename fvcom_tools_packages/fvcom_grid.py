@@ -162,3 +162,17 @@ class Grid(object):
             f.write(obc_header)
             for count, node in zip(np.arange(self.obc)+1, self.open_boundary_nodes):
                 f.write('{} {:d} {:d}\n'.format(count, node + 1, 1))
+
+    def find_nearest_point(self, var, point):
+        lon_station = point[0]
+        lat_station = point[1]
+        if var in ['u', 'v']:
+            lon = self.lonc[:]
+            lat = self.latc[:]
+        else:
+            lon = self.lon[:]
+            lat = self.lat[:]
+        nold_id = np.argmin((lon - lon_station) ** 2 + (lat - lat_station) ** 2)
+
+
+

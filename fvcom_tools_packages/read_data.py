@@ -10,18 +10,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import matplotlib.dates as pltdate
-
-
-class PassiveStore(object):
-    def __init__(self):
-        pass
-
-    def __iter__(self):
-        return (a for a in self.__dict__.keys() if not a.startswith('_'))
-
-    def __eq__(self, other):
-        # For easy comparison of classes.
-        return self.__dict__ == other.__dict__
+from .utily import PassiveStore
 
 
 class ReadData(object):
@@ -31,20 +20,25 @@ class ReadData(object):
     1. read_tp_track —— 读取JTWC发布的台风最佳路径
     2. read_ch_track —— 读取中国气象局发布的台风最佳路径
     3. read_ecmwf_data —— 读取ecmwf数据
+    4. read_fvcom_nc —— 读取包含网格数据的fvcom nc文件
+    5. read_obc_nc —— 读取边界点的nc文件
     """
 
-    def __init__(self, data_path, types='bwp', variables=None, extents=[-90, 90, 0, 360]):
+    def __init__(self, data_path, types=None, str_before=None, str_after=None,
+                 variables=None, extents=[0, 360, -90, 90]):
         """
         参数
         :param data_path:需要去数据的路径, 可以是str，也可以是list（读取nc的时候）
         :param types: 数据类型
         :param variables: 需要读取的变量名称，部分函数需要，list
-        :param extents: 经纬度范围，部分函数需要，例如[lat_left, lat_right, lon_left, lon_right]
+        :param extents: 经纬度范围，部分函数需要，例如[lon_left, lon_right, lat_left, lat_right]
 
         返回
         ：:return self.data
         """
         self.data_path = data_path
+        self.str_before = str_before
+        self.str_after = str_after
         self.variables = variables
         self.data = PassiveStore()
         self.type = types
@@ -61,6 +55,10 @@ class ReadData(object):
             self.read_ch_track()
         elif self.type == 'ecmwf':
             self.read_ecmwf_data()
+        elif self.type == 'fvcom':
+            self.read_fvcom_nc()
+        elif self.type == 'obc':
+            self.read_obc_nc()
 
     def read_bwp_track(self):
         """
@@ -100,8 +98,8 @@ class ReadData(object):
         print("读取CH台风最佳路径文件：{}".format(self.filename))
         ch_data = pd.read_csv(self.data_path, sep='\s+',
                               header=None)
-        index_up = ch_data.loc[ch_data[7].isin(['Flo'])].index      # 找出含有'Flo'所在行
-        index_down = ch_data.loc[ch_data[7].isin(['Gene'])].index
+        index_up = ch_data.loc[ch_data[7].isin([self.str_before])].index      # 找出含有'Flo'所在行
+        index_down = ch_data.loc[ch_data[7].isin([self.str_after])].index
         select_ch_data = ch_data.iloc[index_up[0]: index_down[0]]
         date = list(map(str, select_ch_data.iloc[1:, 0]))
         ch_date = list(map(lambda x: datetime.strptime(x, '%Y%m%d%H'), date))
@@ -137,10 +135,10 @@ class ReadData(object):
         # 选取范围
         lon_temp = nc_file.variables['longitude'][:]
         lat_temp = nc_file.variables['latitude'][:]
-        lat_left_index = np.where(lat_temp <= self.extents[1])[0][0]
-        lat_right_index = np.where(lat_temp >= self.extents[0])[0][-1]
-        lon_left_index = np.where(lon_temp >= self.extents[2])[0][0]
-        lon_right_index = np.where(lon_temp <= self.extents[3])[0][-1]
+        lat_left_index = np.where(lat_temp <= self.extents[3])[0][0]
+        lat_right_index = np.where(lat_temp >= self.extents[2])[0][-1]
+        lon_left_index = np.where(lon_temp >= self.extents[0])[0][0]
+        lon_right_index = np.where(lon_temp <= self.extents[1])[0][-1]
         lat = lat_temp[lat_left_index:lat_right_index + 1]
         lon = lon_temp[lon_left_index:lon_right_index + 1]
         if 'lon' in self.variables:
@@ -173,5 +171,52 @@ class ReadData(object):
                   lon_left_index:lon_right_index+1]
             setattr(self.data, 'slp', slp)
 
+    def read_fvcom_nc(self, mode='r', *args, **kwargs):
+        """
+        功能：读取fvcom的nc文件
+        :return:
+        """
+        print("读取fvcom的nc文件：{}".format(self.filename))
+        nc_file = Dataset(self.data_path, mode, *args, **kwargs)
+        lon = nc_file.variables['lon'][:]
+        lat = nc_file.variables['lat'][:]
+        lonc = nc_file.variables['lonc'][:]
+        latc = nc_file.variables['latc'][:]
+        nv = nc_file.variables['nv'][:]
+        time = nc_file.variables['Times'][:]
+        date = [datetime.strptime(''.join(t.astype(str)), '%Y-%m-%dT%H:%M:%S.%f') for t in time]
+        time_final = pltdate.date2num(date)
+        if 'wind' in self.variables:
+            u10 = nc_file.variables['uwind_speed'][:]
+            v10 = nc_file.variables['vwind_speed'][:]
+            setattr(self.data, 'uwnd', u10)
+            setattr(self.data, 'vwnd', v10)
+        if 'slp' in self.variables:
+            slp = nc_file.variables['air_pressure'][:]
+            setattr(self.data, 'slp', slp)
+        setattr(self.data, 'lon', lon)
+        setattr(self.data, 'lat', lat)
+        setattr(self.data, 'lonc', lonc)
+        setattr(self.data, 'latc', latc)
+        setattr(self.data, 'nv', nv)
+        setattr(self.data, 'time', time_final)
 
-
+    def read_obc_nc(self, *args, **kwargs):
+        """
+        功能：读取obc的nc文件
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        print("读取边界点的nc文件：{}".format(self.filename))
+        nc_file = Dataset(self.data_path, *args, **kwargs)
+        time = nc_file.variables['Times'][:]
+        date = [datetime.strptime(''.join(t.astype(str)), '%Y-%m-%dT%H:%M:%S.%f') for t in time]
+        time_final = pltdate.date2num(date)
+        setattr(self.data, 'time', time_final)
+        if 'obc' in self.variables:
+            obc = nc_file.variables['obc_nodes'][:]
+            setattr(self.data, 'obc', obc)
+        if 'elev' in self.variables:
+            elev = nc_file.variables['elevation'][:]
+            setattr(self.data, 'elev', elev)

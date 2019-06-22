@@ -50,9 +50,37 @@ class FvcomPrep(Grid):
         print("插值共花了{:d}秒".format((t_end-t_start).seconds))
         return forcing_data
 
+    def write_obc_nc(self, ncfile, ptime, zeta, *args, **kwargs):
+        """
+        功能：将obc数据写入到nc文件中
+        :param ncfile: 输出文件名
+        :param ptime: 时间变量，格式为datetime
+        :param obc_data: obc数据
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        globals = {'type': 'FVCOM TIME SERIES ELEVATION FORCING FILE',
+                   'title': 'JULIAN FVCOM TIDAL FORCING DATA CREATED FROM OLD FILE TYPE: anything',
+                   'history': "File created using {} with write_obc_nc from python".format(
+                       datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}
+        # 定义维度
+        dims = {'nobc': self.obc, 'time': 0, 'DateStrLen': 26}
+
+        with WriteForcing(ncfile, dims, globle_attributes=globals, format='NETCDF3_64BIT') as obc_ncfile:
+            atts = {'long_name': 'Open Boundary Node Number', 'grid': 'obc_grid'}
+            obc_ncfile.add_variable('obc_nodes', self.open_boundary_nodes + 1, ['nobc'],
+                                    attributes=atts, format='i')
+            # 写入时间
+            obc_ncfile.write_fvcom_time(ptime)
+            atts = {'long_name': 'Open Boundary Elevation', 'units': 'meters'}
+            obc_ncfile.add_variable('elevation', zeta, ['time', 'nobc'],
+                                    attributes=atts)
+
+
     def write_surface_forcing(self, ncfile, ptime, forcing_data, **kwargs):
         """
-        功能：讲表面强迫数据写入nc文件，数据经常来自ncep、ecmwf
+        功能：将表面强迫数据写入nc文件，数据经常来自ncep、ecmwf
         :param ncfile: 输出nc文件
         :param ptime:  时间变量，格式为datetime
         :param forcing_data: 表面驱动数据
@@ -72,7 +100,7 @@ class FvcomPrep(Grid):
         dims = {'nele': self.nele, 'node': self.node, 'three': 3,
                 'time': 0, 'DateStrLen': 26, 'scalar': 1}
 
-        with WriteForcing(ncfile, dims, globle_attributes=globals, format='NETCDF4') as surf_ncfile:
+        with WriteForcing(ncfile, dims, globle_attributes=globals, format='NETCDF3_64BIT') as surf_ncfile:
             # 写入网格
             grid = Grid(self.grid_path)
             surf_ncfile.write_fvcom_grid(grid)
@@ -101,7 +129,7 @@ class FvcomPrep(Grid):
                         'gird': 'fvcom_grid',
                         'coordinate': self.nativeCoords,
                         'type': 'data'}
-                surf_ncfile.add_variable('air pressure', forcing_data.slp, ['time', 'node'],
+                surf_ncfile.add_variable('air_pressure', forcing_data.slp, ['time', 'node'],
                                          attributes=atts)
 
 

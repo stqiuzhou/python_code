@@ -11,6 +11,7 @@ from netCDF4 import Dataset
 from cmocean import cm
 import logging
 from PyFVCOM.grid import Domain
+from fvcom_tools_packages.fvcom_grid import Grid
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class PlotFigure(object):
     方法：
     1. plot_lines —— 画折线图
     """
-    def __init__(self, figure=None, axes=None, figsize=(12, 8),
+    def __init__(self, grid_path=None, figure=None, axes=None, figsize=(12, 8),
                  extents=None, title=None, title_font=None, ax_font=None,
                  m=None, cartesian=False, tick_inc=None, grid=False,
                  depth=False, cb_label=None):
@@ -56,6 +57,7 @@ class PlotFigure(object):
         self.grid = grid
         self.depth = depth
         self.cb_label = cb_label
+        self.grid_path = grid_path
 
         # 判断是否需要网格 0代表无网格
         if self.grid:
@@ -69,6 +71,9 @@ class PlotFigure(object):
         # else:
         #     self._ReadData = False
         self._init_figure()
+        # 读取网格
+        if self.grid_path:
+            self.grid = Grid(self.grid_path)
 
     def _init_figure(self):
         # 初始化图像
@@ -182,13 +187,27 @@ class PlotFigure(object):
         :param kwargs:
         :return:
         """
-        domain = Domain(mesh_2dm, native_coordinates='spherical')
-        x, y = self.m(domain.grid.lon, domain.grid.lat)
-        self.tripcolor_plot = self.ax.tripcolor(x, y, domain.grid.triangles,
-                                                  facecolors=-domain.grid.h_center,
+        x, y = self.m(self.grid.lon, self.grid.lat)
+        self.tripcolor_plot = self.ax.tripcolor(x, y, self.grid.tri,
+                                                  facecolors=-self.grid.h_center,
                                                       *args, **kwargs)
-        cbar = self.ax.coloarbar(self.tripcolor_plot)
+        cbar = self.ax.colorbar(self.tripcolor_plot)
         cbar.ax.tick_params(labelsize=15)
         if self.cb_label:
-            cbar.set_label(self.cb_label, fontdict=self.ax_font)
+            cbar.set_label(self.cb_label, fontdict=self.axes_font)
+
+    def plot_field_based_grid(self, values, *args, **kwargs):
+        x, y = self.m(self.grid.lon, self.grid.lat)
+        wind_plot = self.ax.tripcolor(x, y, self.grid.tri,
+                                      facecolors=values, cmap=plt.cm.jet,
+                                      *args, **kwargs)
+        self.set_colorbar(wind_plot)
+
+    def set_colorbar(self, plot_object):
+        cbar = self.fig.colorbar(plot_object)
+        plot_object.set_clim(vmin=0, vmax=30)
+        if self.cb_label:
+            cbar.set_label(self.cb_label, fontdict=self.axes_font)
+    def show(self):
+        plt.show()
 

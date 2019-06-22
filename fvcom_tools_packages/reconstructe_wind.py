@@ -90,7 +90,7 @@ class Reconstructe(object):
         if self.press_mold == 1:
             self.Pr = self.P1 - (self.P1 - self.Pc) / np.sqrt(1 + (self.r / self.Rmax) ** 2)
             # dp/dr
-            self.dpdr = (self.P1 - self.Pc) * self.r / self.Rmax ** 2 / (1 + (self.r / self.Rmax) ** 2) ** 1.5
+            self.dpdr = (self.P1 - self.Pc) * self.r / self.Rmax ** 2 / (1 + (self.r / self.Rmax) ** 2) ** 1.5 * 100
 
     def _gradient_windfild(self):
         """
@@ -100,11 +100,12 @@ class Reconstructe(object):
         # 梯度风公式
         self.Vg = -self.f * self.r / 2 + np.sqrt(self.f ** 2 / 4 * self.r ** 2 + self.r / self.rol * self.dpdr)
         # 每个点到台风中心点的经纬度方向的距离，单位：m
-        dx = self.r_earth * np.deg2rad(self.lon-self.lonc) * np.cos((self.lat + self.latc) * 0.5)
+        dx = self.r_earth * np.deg2rad(self.lon-self.lonc) * np.cos(np.deg2rad((self.lat + self.latc) * 0.5))
         dy = self.r_earth * np.deg2rad(self.lat - self.latc)
         # u，v方向上的梯度风
-        self.u_vg = self.Vg * (dx * np.sin(self.theta) + dy * np.cos(self.theta))
-        self.v_vg = self.Vg * (dx * np.cos(self.theta) - dy * np.sin(self.theta))
+        self.theta = np.deg2rad(self.theta)
+        self.u_vg = self.Vg * (dx * np.sin(self.theta) + dy * np.cos(self.theta)) / self.r
+        self.v_vg = self.Vg * (dx * np.cos(self.theta) - dy * np.sin(self.theta)) / self.r
 
     def _move_windfild(self):
         """
@@ -113,7 +114,7 @@ class Reconstructe(object):
         :return:
         """
         # 台风最佳路径相邻点之间经纬度方向的距离，单位：m
-        dis_x = self.r_earth * np.deg2rad(self.lonc_af - self.lonc) * np.cos(self.latc)
+        dis_x = self.r_earth * np.deg2rad(self.lonc_af - self.lonc) * np.cos(np.deg2rad(self.latc))
         dis_y = self.r_earth * np.deg2rad(self.latc_af - self.latc)
 
         if self.move_mold == 1:
@@ -133,5 +134,5 @@ class Reconstructe(object):
         wind_x = c1 * self.u_mov - c2 * self.u_vg
         wind_y = c1 * self.v_mov + c2 * self.v_vg
         wind = np.sqrt(wind_x ** 2 + wind_y ** 2)
-        return wind
+        return wind_x, wind_y, wind
 
