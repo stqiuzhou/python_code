@@ -9,12 +9,45 @@ from netCDF4 import Dataset, date2num
 from .fvcom_grid import Grid
 from .utily import PassiveStore
 from datetime import datetime
-from scipy.interpolate import griddata
+from scipy.interpolate import griddata, interp1d
 
 class FvcomPrep(Grid):
 
-    def __init__(self, data_path, **kwargs):
-        super().__init__(data_path)
+    def __init__(self, data_path=None, **kwargs):
+        if data_path is not None:
+            super().__init__(data_path)
+
+    def interp_temp_spatial(self, perp_lon, perp_lat, perp_time, perp_value,
+                            interp_lon, interp_lat, interp_time, time_single=False):
+        """
+        对时空方向分别进行插值
+        :param perp_data: 插值所用的数据，包括lon，lat，time，values
+        :param interp_data: 待插值的数据，包括lon，lat，time
+        :return: interped_data: 插值结果
+        """
+        # 先对空间进行插值
+        X, Y = np.meshgrid(perp_lon, perp_lat)
+        perp_time_num = len(perp_time)
+        interp_spatial_num = len(interp_lon)
+        interped_data_time = np.ones([perp_time_num, interp_spatial_num])
+        for itime in range(perp_time_num):
+            interped_tmp = griddata((X.ravel(), Y.ravel()), perp_value[itime, :, :].ravel(),
+                                    (interp_lon, interp_lat))
+            interped_data_time[itime, :] = interped_tmp
+        # 再对时间进行插值
+        if time_single:
+            interped_data = np.ones(interp_spatial_num)
+        else:
+            interped_data = np.ones([len(interp_time), interp_spatial_num])
+        for ilon in range(interp_spatial_num):
+            func = interp1d(perp_time, interped_data_time[:, ilon])
+            if time_single:
+                interped_tmp = func(interp_time[ilon])
+                interped_data[ilon] = interped_tmp
+            else:
+                interped_tmp = func(interp_time)
+                interped_data[:, ilon] = interped_tmp
+        return interped_data
 
     def interp_surface_forcing(self, data):
         """
@@ -33,15 +66,21 @@ class FvcomPrep(Grid):
             LON, LAT = np.meshgrid(data.lon, data.lat)
             if 'u10' in data:
                 uwind_tmp = griddata((LON.ravel(), LAT.ravel()), data.u10[i, :, :].ravel(),
-                                     (self.lonc, self.latc), method='nearest')
+                                     (self.lonc, self.latc))
+                if len(np.argwhere(np.isnan(uwind_tmp))) > 0:
+                    raise ValueError('存在NAN值')
                 uwnd_final[i, :] = uwind_tmp
             if 'v10' in data:
-                vwind_tmp = griddata((LON.ravel(), LAT.ravel()), data.u10[i, :, :].ravel(),
-                                     (self.lonc, self.latc), method='nearest')
-                vwnd_final[i, :] = uwind_tmp
+                vwind_tmp = griddata((LON.ravel(), LAT.ravel()), data.v10[i, :, :].ravel(),
+                                     (self.lonc, self.latc))
+                if len(np.argwhere(np.isnan(vwind_tmp))) > 0:
+                    raise ValueError('存在NAN值')
+                vwnd_final[i, :] = vwind_tmp
             if 'slp' in data:
                 slf_tmp = griddata((LON.ravel(), LAT.ravel()), data.slp[i, :, :].ravel(),
-                                   (self.lon, self.lat), method='nearest')
+                                   (self.lon, self.lat))
+                if len(np.argwhere(np.isnan(slf_tmp))) > 0:
+                    raise ValueError('存在NAN值')
                 slp_final[i, :] = slf_tmp
         setattr(forcing_data, 'uwnd', uwnd_final)
         setattr(forcing_data, 'vwnd', vwnd_final)
@@ -102,9 +141,11 @@ class FvcomPrep(Grid):
 
         with WriteForcing(ncfile, dims, globle_attributes=globals, format='NETCDF3_64BIT') as surf_ncfile:
             # 写入网格
+            print('写入网格中……')
             grid = Grid(self.grid_path)
             surf_ncfile.write_fvcom_grid(grid)
             # 写入时间
+            print('写入时间中……')
             surf_ncfile.write_fvcom_time(ptime)
             # 写入表明强迫数据
             if 'uwnd' in forcing_data:
@@ -190,6 +231,9 @@ class WriteForcing(object):
         Itime2 = (mjd - Itime) * 24 * 60 * 60 * 1000  # 从0点开始的毫秒数
         Times = [t.strftime('%Y-%m-%dT%H:%M:%S.%f') for t in time]
 
+        # nprocs
+        atts = {'long_name': 'number of processors'}
+        self.add_variable('nprocs', 1, ['scalar'], attributes=atts, format='i')
         # iint
         atts = {'long_name': 'internal mode iteration number'}
         self.add_variable('iint', np.arange(len(time)), ['time'], attributes=atts, format='i')

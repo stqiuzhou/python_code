@@ -7,11 +7,12 @@
 import numpy as np
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
+from matplotlib.dates import DateFormatter, DayLocator
 from netCDF4 import Dataset
 from cmocean import cm
 import logging
-from PyFVCOM.grid import Domain
 from fvcom_tools_packages.fvcom_grid import Grid
+import seaborn as sns
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,8 @@ class PlotFigure(object):
     def __init__(self, grid_path=None, figure=None, axes=None, figsize=(12, 8),
                  extents=None, title=None, title_font=None, ax_font=None,
                  m=None, cartesian=False, tick_inc=None, grid=False,
-                 depth=False, cb_label=None):
+                 depth=False, cb_label=None, x_label=None, y_label=None,
+                 legend_label=None):
         """
         参数：
         # :param data: 数据，支持ReadData格式或者Dataset格式
@@ -42,6 +44,9 @@ class PlotFigure(object):
         :param grid:    坐标轴网格，True表示有网格，False表示没网格
         :param depth:   True表示添加水深数据，False表示不添加水深数据
         :param cb_label: colorbar 的标签
+        :param x_label: x坐标轴的标签
+        :param y_label: y坐标轴的标签
+        :param legend_label: legend 标签, 输入格式：tuple或者array
         """
         # self.ds = data
         self.fig = figure
@@ -58,6 +63,9 @@ class PlotFigure(object):
         self.depth = depth
         self.cb_label = cb_label
         self.grid_path = grid_path
+        self.x_label = x_label
+        self.y_label = y_label
+        self.legend_label = legend_label
 
         # 判断是否需要网格 0代表无网格
         if self.grid:
@@ -81,7 +89,7 @@ class PlotFigure(object):
             self.fig = plt.figure(figsize=self.figsize)
         if self.ax is None:
             # 四个参数为坐下宽高相对整体figure的大小
-            self.ax = self.fig.add_axes([0.1, 0.1, 0.8, 0.8])
+            self.ax = self.fig.add_subplot(111)
         if self.title:
             self.ax.set_title(self.title, fontdict=self.title_font, pad=15)
         # basemap
@@ -121,11 +129,19 @@ class PlotFigure(object):
             self.m.drawmapboundary(linewidth=3)
             self.m.fillcontinents(color='tan')
         else:
-            self.ax.set_xticks(np.arange(self.extents[0], self.extents[1] + self.tick_inc[0], self.tick_inc[0]))
-            self.ax.set_yticks(np.arange(self.extents[2], self.extents[3] + self.tick_inc[1], self.tick_inc[1]))
+            if self.grid:
+                self.ax.grid()
+
+
         # 添加水深
         if self.depth:
             self._add_depth_data()
+
+        # 添加xy坐标轴的标签
+        if self.x_label is not None:
+            self.ax.set_xlabel(self.x_label)
+        if self.y_label is not None:
+            self.ax.set_ylabel(self.y_label)
 
     def _add_depth_data(self):
         """
@@ -165,18 +181,32 @@ class PlotFigure(object):
                     del(level.get_paths()[kp])
         self.ax.clabel(contour, inline=1, fmt='%1.0f', fontsize=15, colors='k')
 
-    def plot_lines(self, x, y, *args, **kwargs):
+    def plot_lines(self, x, y, time_series=False, double_yaxis=False, double_y=None,
+                   double_ylabel=None, *args, **kwargs):
         """
         功能：画折线图，基于basemap或者笛卡尔坐标系
+        :param x: 横坐标的值
+        :param y：纵坐标的值
+        :param time_series： 判断x轴是不是时间类型
+        :param double_yaxis: 判断是否需要双y轴
+        :param legends: legends 标签
         :return:
         """
         if not self.cartesian:
             base_x, base_y = self.m(x, y)
         else:
             base_x, base_y = x, y
+        line_plot, = self.ax.plot(base_x, base_y, *args, **kwargs)
 
-        self.line_plot = self.ax.plot(base_x, base_y, *args, **kwargs)
-        plt.show()
+        if time_series:
+            self.ax.set_xlabel('Times', fontdict=self.axes_font)
+            self.set_time_xaxis()
+
+        if double_yaxis:
+            ax2 = self.ax.twinx()
+            line_plot2, = ax2.plot(x, double_y, 'r')
+            ax2.set_ylabel(double_ylabel)
+            self.ax.legend((line_plot, line_plot2), self.legend_label, loc='upper center')
 
     def plot_sms_grid(self, mesh_2dm, *args, **kwargs):
         """
@@ -196,18 +226,103 @@ class PlotFigure(object):
         if self.cb_label:
             cbar.set_label(self.cb_label, fontdict=self.axes_font)
 
-    def plot_field_based_grid(self, values, *args, **kwargs):
-        x, y = self.m(self.grid.lon, self.grid.lat)
-        wind_plot = self.ax.tripcolor(x, y, self.grid.tri,
+    def plot_surface(self, x, y, values, *args, **kwargs):
+        """
+        功能：画空间分布的图，例如pcolor，contour等
+        :param x: 一般指经度
+        :param y: 一般指纬度
+        :param values: 参数值
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        xx, yy = self.m(x, y)
+        if self.grid:
+            surface_plot = self.ax.tripcolor(xx, yy, self.grid.tri,
                                       facecolors=values, cmap=plt.cm.jet,
                                       *args, **kwargs)
-        self.set_colorbar(wind_plot)
+        else:
+            surface_plot = self.ax.pcolor(xx, yy, values, cmap=plt.cm.jet,
+                                          *args, **kwargs)
+        self.set_colorbar(surface_plot)
+
+    def plot_quiver(self, u, v, grid=False, *args, **kwargs):
+        x, y = self.m(self.grid.lonc, self.grid.latc)
+
+    def plot_windDir_time(self, time, spd, dir, interval=1, *args, **kwargs):
+        """
+        功能：画风速风向的时间序列图
+        :param time: 时间
+        :param spd: 风速
+        :param dir: 风向
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        u = spd * np.sin(np.deg2rad(dir))
+        v = spd * np.cos(np.deg2rad(dir))
+        Q = self.ax.quiver(time, 2, u, v, width=0.003, scale=80, *args, **kwargs)
+        self.ax.quiverkey(Q, 0.1, 0.7, 5, '5 m/s', fontproperties=self.axes_font)
+        self.ax.set_xlabel('Times', fontdict=self.axes_font)
+        self.ax.yaxis.set_visible(False)
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.spines['left'].set_visible(False)
+        self.set_time_xaxis(time_interval=interval)
+
+    def set_time_xaxis(self, time_interval=1):
+        """
+        功能：添加时间作为x轴的tick
+        :param time_interval: 日期显示的间隔
+        :return:
+        """
+        self.ax.xaxis.set_major_locator(DayLocator(interval=time_interval))
+        self.ax.xaxis.set_major_formatter(DateFormatter('%m/%d/%H'))
+        self.fig.autofmt_xdate()
+
 
     def set_colorbar(self, plot_object):
+        """
+        功能：添加colorbar
+        :param plot_object: 需要添加colorbar的对象
+        :return:
+        """
         cbar = self.fig.colorbar(plot_object)
-        plot_object.set_clim(vmin=0, vmax=30)
+        plot_object.set_clim(vmin=0, vmax=18)
         if self.cb_label:
             cbar.set_label(self.cb_label, fontdict=self.axes_font)
+
+    def subolots_adjust(self, left=0.18, wspace=0.25, hspace=0.25,
+                    bottom=0.13, top=0.91, *args, **kwargs):
+        """
+        功能：调整子图周围的距离
+        :param left: 左边界
+        :param wspace: 子图之间的横向间距
+        :param hspace: 自如之间的纵向间距
+        :param bottom: 下边界
+        :param top: 上边界
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        plt.subplots_adjust(left=left, wspace=wspace, hspace=hspace,
+                            bottom=bottom, top=top, *args, **kwargs)
+
     def show(self):
+        """
+        功能：显示图片
+        :return:
+        """
+        plt.tight_layout()
         plt.show()
+
+    def save(self, name, *args, **kwargs):
+        """
+        功能：存储图片
+        :param name: 图片路径名
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        self.fig.savefig(name, bbox_inches='tight', transparent=True, *args, **kwargs)
 

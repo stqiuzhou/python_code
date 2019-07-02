@@ -50,6 +50,6 @@ elevation = obc_data.data.elev + IB * 0.001
 
 # 写入到nc文件中
 prep = FvcomPrep(sms_path)
-output_ncfile = r'H:\fvcom\fvcom_input_file\julian_obc_adjuested1.nc'
+output_ncfile = r'H:\fvcom\fvcom_input_file\julian_obc_adjusted_ecmwf.nc'
 ptime = num2date(obc_data.data.time)
 prep.write_obc_nc(output_ncfile, ptime, elevation)

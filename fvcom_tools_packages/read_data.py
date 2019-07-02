@@ -11,9 +11,10 @@ import numpy as np
 from datetime import datetime
 import matplotlib.dates as pltdate
 from .utily import PassiveStore
+from fvcom_tools_packages.fvcom_grid import Grid
 
 
-class ReadData(object):
+class ReadData(Grid):
     """
     功能：读取各种类型的数据
     方法：
@@ -25,7 +26,7 @@ class ReadData(object):
     """
 
     def __init__(self, data_path, types=None, str_before=None, str_after=None,
-                 variables=None, extents=[0, 360, -90, 90]):
+                 variables=None, extents=[0, 360, -90, 90], alti_cycle=None):
         """
         参数
         :param data_path:需要去数据的路径, 可以是str，也可以是list（读取nc的时候）
@@ -43,6 +44,7 @@ class ReadData(object):
         self.data = PassiveStore()
         self.type = types
         self.extents = extents
+        self.alti_cycle = alti_cycle
         # 分割出文件名
         if isinstance(self.data_path, str):
             self.filename = self.data_path.split('\\')[-1]
@@ -53,12 +55,16 @@ class ReadData(object):
             self.read_bwp_track()
         elif self.type == 'ch':
             self.read_ch_track()
+        elif self.type == 'ncep':
+            self.read_ncep_data()
         elif self.type == 'ecmwf':
             self.read_ecmwf_data()
         elif self.type == 'fvcom':
             self.read_fvcom_nc()
         elif self.type == 'obc':
             self.read_obc_nc()
+        elif self.type == 'alti':
+            self.read_alti_data()
 
     def read_bwp_track(self):
         """
@@ -114,6 +120,55 @@ class ReadData(object):
         setattr(self.data, 'tp_lon', ch_lon)
         setattr(self.data, 'tp_press', ch_press)
         setattr(self.data, 'tp_vmax', ch_vmax)
+
+    def read_ncep_data(self):
+        """
+        功能：读取ncep再分析数据
+        :return:
+        """
+        if isinstance(self.data_path, str):
+            print("读取NCEP文件：{}".format(self.filename))
+            nc_file = Dataset(self.data_path)
+        elif isinstance(self.data_path, list):
+            # 读取多文件
+            print("读取NCEP文件：{}".format(self.filenames))
+            nc_file = MFDataset(self.data_path)
+            first_file = self.data_path[0].split('\\')[-1]
+            end_file = self.data_path[-1].split('\\')[-1]
+        else:
+            raise ValueError("不支持输入的格式")
+
+        # 读取各种变量，并存储
+        # 自己写时间（因为每个ncep文件的时间单位都不一样）
+        start_time = first_file.split('.')[2].split('-')[0]
+        end_time = end_file.split('.')[2].split('-')[-1] + ' '+ '18:00:00'
+        time_range = pd.date_range(start_time, end_time, freq='6h')
+        time = pltdate.date2num(time_range)
+        setattr(self.data, 'time', time)
+        # 选取范围
+        lon_temp = nc_file.variables['lon'][:]
+        lat_temp = nc_file.variables['lat'][:]
+        lat_left_index = np.where(lat_temp <= self.extents[3])[0][0]
+        lat_right_index = np.where(lat_temp >= self.extents[2])[0][-1]
+        lon_left_index = np.where(lon_temp >= self.extents[0])[0][0]
+        lon_right_index = np.where(lon_temp <= self.extents[1])[0][-1]
+        lat = lat_temp[lat_left_index:lat_right_index + 1]
+        lon = lon_temp[lon_left_index:lon_right_index + 1]
+        if 'lon' in self.variables:
+            setattr(self.data, 'lon', lon)
+        if 'lat' in self.variables:
+            setattr(self.data, 'lat', lat)
+        if 'wind' in self.variables:
+            u10 = nc_file.variables['U_GRD_L105'][:, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
+            setattr(self.data, 'u10', u10)
+            v10 = nc_file.variables['V_GRD_L105'][:, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
+            setattr(self.data, 'v10', v10)
+        if 'slp' in self.variables:
+            slp = nc_file.variables['PRES_L1'][:, lat_left_index:lat_right_index+1,
+                  lon_left_index:lon_right_index+1]
+            setattr(self.data, 'slp', slp)
 
     def read_ecmwf_data(self):
         """
@@ -184,7 +239,10 @@ class ReadData(object):
         latc = nc_file.variables['latc'][:]
         nv = nc_file.variables['nv'][:]
         time = nc_file.variables['Times'][:]
-        date = [datetime.strptime(''.join(t.astype(str)), '%Y-%m-%dT%H:%M:%S.%f') for t in time]
+        try:
+            date = [datetime.strptime(''.join(t.astype(str)), '%Y-%m-%dT%H:%M:%S.%f') for t in time]
+        except:
+            date = [datetime.strptime(''.join(t.astype(str)), '%Y/%m/%d %H:%M:%S      ') for t in time]
         time_final = pltdate.date2num(date)
         if 'wind' in self.variables:
             u10 = nc_file.variables['uwind_speed'][:]
@@ -194,11 +252,17 @@ class ReadData(object):
         if 'slp' in self.variables:
             slp = nc_file.variables['air_pressure'][:]
             setattr(self.data, 'slp', slp)
-        setattr(self.data, 'lon', lon)
-        setattr(self.data, 'lat', lat)
-        setattr(self.data, 'lonc', lonc)
-        setattr(self.data, 'latc', latc)
-        setattr(self.data, 'nv', nv)
+        if 'zeta' in self.variables:
+            zeta = nc_file.variables['zeta'][:]
+            setattr(self.data, 'zeta', zeta)
+        if 'h' in self.variables:
+            h = nc_file.variables['h'][:]
+            setattr(self.data, 'h', h)
+        setattr(self, 'lon', lon)
+        setattr(self, 'lat', lat)
+        setattr(self, 'lonc', lonc)
+        setattr(self, 'latc', latc)
+        setattr(self, 'nv', nv)
         setattr(self.data, 'time', time_final)
 
     def read_obc_nc(self, *args, **kwargs):
@@ -220,3 +284,39 @@ class ReadData(object):
         if 'elev' in self.variables:
             elev = nc_file.variables['elevation'][:]
             setattr(self.data, 'elev', elev)
+
+    def read_alti_data(self, *args, **kwargs):
+        """
+        功能：读取高度计数据
+        :return:
+        """
+        print("读取高度计文件：{}".format(self.filename))
+        alti_nc = Dataset(self.data_path, *args, **kwargs)
+        alti_lat = alti_nc.variables['lat'][:]
+        alti_lon = alti_nc.variables['lon'][:]
+        alti_cycle = alti_nc.variables['cycle'][:]
+        alti_time = alti_nc.variables['time'][:]
+        alti_time_tmp = num2date(alti_time, alti_nc.variables['time'].units)
+        alti_time = pltdate.date2num(alti_time_tmp)
+        alti_sla = alti_nc.variables['sla'][:]
+        alti_dac = alti_nc.variables['dac'][:]
+        alti_sla = alti_sla + alti_dac
+        if self.alti_cycle is not None:
+            if isinstance(self.alti_cycle, int):
+                index = np.where(alti_cycle == self.alti_cycle)
+                alti_sla = alti_sla[:, index].ravel()
+                alti_time = alti_time[:, index].ravel()
+            else:
+                alti_sla = np.ones([len(alti_lon), len(self.alti_cycle)])
+                alti_time = np.ones([len(alti_lon), len(self.alti_cycle)])
+                for idx, icycle in enumerate(self.alti_cycle):
+                    index = np.where(alti_cycle == icycle)
+                    alti_sla_tmp = alti_sla[:, index].ravel()
+                    alti_time_tmp = alti_time[:, index].ravel()
+                    alti_sla[:, idx] = alti_sla_tmp
+                    alti_time[:, idx] = alti_time_tmp
+        setattr(self.data, 'alti_lat', alti_lat)
+        setattr(self.data, 'alti_lon', alti_lon)
+        setattr(self.data, 'alti_time', alti_time)
+        setattr(self.data, 'alti_sla', alti_sla)
+        setattr(self.data, 'alti_cycle', self.alti_cycle)

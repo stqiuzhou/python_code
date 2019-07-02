@@ -173,6 +173,8 @@ class Grid(object):
             lon = self.lon[:]
             lat = self.lat[:]
         nold_id = np.argmin((lon - lon_station) ** 2 + (lat - lat_station) ** 2)
+        return nold_id
+
 
 
 
