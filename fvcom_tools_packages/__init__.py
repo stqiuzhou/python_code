@@ -15,6 +15,7 @@ plt.rcParams['figure.dpi'] = 600
 plt.rcParams['savefig.dpi'] = 600
 plt.rcParams['pdf.fonttype'] = 42
 plt.rcParams['ps.fonttype'] = 42
+plt.rcParams['svg.fonttype'] = 'none'
 # 初始化标题
 plt.rcParams['axes.titlesize'] = 25
 plt.rcParams['axes.titleweight'] = 'bold'
@@ -27,5 +28,7 @@ plt.rcParams['ytick.labelsize'] = 15
 # 初始化legend
 plt.rcParams['legend.fontsize'] = 20
 plt.rcParams['legend.title_fontsize'] = 20
+# 初始化线条
+plt.rcParams['lines.linewidth'] = 1.5
 
 

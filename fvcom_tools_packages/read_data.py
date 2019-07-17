@@ -33,6 +33,9 @@ class ReadData(Grid):
         :param types: 数据类型
         :param variables: 需要读取的变量名称，部分函数需要，list
         :param extents: 经纬度范围，部分函数需要，例如[lon_left, lon_right, lat_left, lat_right]
+        :param str_before: 从多个台风路径中分离出我们所需要的台风，这个是上标，用于read_ch_track
+        :param str_after: 从多个台风路径中分离出我们所需要的台风，这个是下标，用于read_ch_track
+        :param alti_cycle: 选取高度计的cycle，用于read_alti_data
 
         返回
         ：:return self.data
@@ -65,6 +68,28 @@ class ReadData(Grid):
             self.read_obc_nc()
         elif self.type == 'alti':
             self.read_alti_data()
+        elif self.type == 'site_excel':
+            self.read_site_excel()
+        elif self.type == 'gauge':
+            self.read_gauge_data()
+
+    def read_gauge_data(self):
+        """
+        功能：读取验潮站的数据
+        :return:
+        """
+        print("读取验潮站数据文件：{}".format(self.filename))
+        gauge_data = pd.read_csv(self.data_path, skiprows=[0], header=None,
+                                   sep='\s+')
+        year = str(gauge_data.iloc[0, 2])[:4]
+        gauge_data.drop([0, 1, 2], axis=1, inplace=True)
+        level_data = gauge_data.values.flatten()
+        time_data = pd.date_range('{}-01-01 00:00:00'.format(year),
+                                  '{}-12-31 23:00:00'.format(year),
+                                  freq='H')
+        time_stamp = pltdate.date2num(time_data)
+        setattr(self.data, 'time', time_stamp)
+        setattr(self.data, 'elev', level_data)
 
     def read_bwp_track(self):
         """
@@ -72,7 +97,6 @@ class ReadData(Grid):
         网站：https://www.metoc.navy.mil/jtwc/jtwc.html
         返回：
         :return: self.data
-
         """
         print("读取JTWC台风最佳路径文件：{}".format(self.filename))
         tp_data = pd.read_csv(self.data_path, sep=',',
@@ -104,13 +128,13 @@ class ReadData(Grid):
         print("读取CH台风最佳路径文件：{}".format(self.filename))
         ch_data = pd.read_csv(self.data_path, sep='\s+',
                               header=None)
-        index_up = ch_data.loc[ch_data[7].isin([self.str_before])].index      # 找出含有'Flo'所在行
+        index_up = ch_data.loc[ch_data[7].isin([self.str_before])].index  # 找出含有'Flo'所在行
         index_down = ch_data.loc[ch_data[7].isin([self.str_after])].index
         select_ch_data = ch_data.iloc[index_up[0]: index_down[0]]
         date = list(map(str, select_ch_data.iloc[1:, 0]))
         ch_date = list(map(lambda x: datetime.strptime(x, '%Y%m%d%H'), date))
         ch_time = pltdate.date2num(ch_date)
-        ch_lat = select_ch_data.iloc[1:, 2].values * 0.1      # 转化为numpy
+        ch_lat = select_ch_data.iloc[1:, 2].values * 0.1  # 转化为numpy
         ch_lon = select_ch_data.iloc[1:, 3].values * 0.1
         ch_press = select_ch_data.iloc[1:, 4].values
         ch_vmax = select_ch_data.iloc[1:, 5].values
@@ -141,7 +165,7 @@ class ReadData(Grid):
         # 读取各种变量，并存储
         # 自己写时间（因为每个ncep文件的时间单位都不一样）
         start_time = first_file.split('.')[2].split('-')[0]
-        end_time = end_file.split('.')[2].split('-')[-1] + ' '+ '18:00:00'
+        end_time = end_file.split('.')[2].split('-')[-1] + ' ' + '18:00:00'
         time_range = pd.date_range(start_time, end_time, freq='6h')
         time = pltdate.date2num(time_range)
         setattr(self.data, 'time', time)
@@ -166,8 +190,8 @@ class ReadData(Grid):
                   lon_left_index:lon_right_index + 1]
             setattr(self.data, 'v10', v10)
         if 'slp' in self.variables:
-            slp = nc_file.variables['PRES_L1'][:, lat_left_index:lat_right_index+1,
-                  lon_left_index:lon_right_index+1]
+            slp = nc_file.variables['PRES_L1'][:, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
             setattr(self.data, 'slp', slp)
 
     def read_ecmwf_data(self):
@@ -207,23 +231,23 @@ class ReadData(Grid):
             x, y = np.unique(time, return_index=True)
             setattr(self.data, 'time', x)
         if 'wind' in self.variables:
-            u10 = nc_file.variables['u10'][y, lat_left_index:lat_right_index+1,
-                  lon_left_index:lon_right_index+1]
+            u10 = nc_file.variables['u10'][y, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
             setattr(self.data, 'u10', u10)
-            v10 = nc_file.variables['v10'][y, lat_left_index:lat_right_index+1,
-                  lon_left_index:lon_right_index+1]
+            v10 = nc_file.variables['v10'][y, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
             setattr(self.data, 'v10', v10)
         if 'sst' in self.variables:
-            sst = nc_file.variables['sst'][y, lat_left_index:lat_right_index+1,
-                  lon_left_index:lon_right_index+1]
-            setattr(self.data, 'sst', sst)
+            sst = nc_file.variables['sst'][y, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
+            setattr(self.data, 'sst', sst - 273.15)
         if 't2m' in self.variables:
-            t2m = nc_file.variables['t2m'][y, lat_left_index:lat_right_index+1,
-                  lon_left_index:lon_right_index+1]
-            setattr(self.data, 't2m', t2m)
+            t2m = nc_file.variables['t2m'][y, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
+            setattr(self.data, 't2m', t2m - 273.15)
         if 'slp' in self.variables:
-            slp = nc_file.variables['sp'][y, lat_left_index:lat_right_index+1,
-                  lon_left_index:lon_right_index+1]
+            slp = nc_file.variables['sp'][y, lat_left_index:lat_right_index + 1,
+                  lon_left_index:lon_right_index + 1]
             setattr(self.data, 'slp', slp)
 
     def read_fvcom_nc(self, mode='r', *args, **kwargs):
@@ -288,6 +312,8 @@ class ReadData(Grid):
     def read_alti_data(self, *args, **kwargs):
         """
         功能：读取高度计数据
+        :param *args
+        :param **kwargs
         :return:
         """
         print("读取高度计文件：{}".format(self.filename))
@@ -307,16 +333,57 @@ class ReadData(Grid):
                 alti_sla = alti_sla[:, index].ravel()
                 alti_time = alti_time[:, index].ravel()
             else:
-                alti_sla = np.ones([len(alti_lon), len(self.alti_cycle)])
-                alti_time = np.ones([len(alti_lon), len(self.alti_cycle)])
+                alti_sla_final = np.ma.ones([len(alti_lon), len(self.alti_cycle)])
+                alti_time_final = np.ma.ones([len(alti_lon), len(self.alti_cycle)])
                 for idx, icycle in enumerate(self.alti_cycle):
-                    index = np.where(alti_cycle == icycle)
+                    index = np.where(alti_cycle == icycle)[0][0]
                     alti_sla_tmp = alti_sla[:, index].ravel()
                     alti_time_tmp = alti_time[:, index].ravel()
-                    alti_sla[:, idx] = alti_sla_tmp
-                    alti_time[:, idx] = alti_time_tmp
+                    alti_sla_final[:, idx] = alti_sla_tmp
+                    alti_time_final[:, idx] = alti_time_tmp
+                alti_sla = alti_sla_final
+                alti_time = alti_time_final
+            alti_cycle = self.alti_cycle
         setattr(self.data, 'alti_lat', alti_lat)
         setattr(self.data, 'alti_lon', alti_lon)
         setattr(self.data, 'alti_time', alti_time)
         setattr(self.data, 'alti_sla', alti_sla)
-        setattr(self.data, 'alti_cycle', self.alti_cycle)
+        setattr(self.data, 'alti_cycle', alti_cycle)
+
+    def read_site_excel(self, *args, **kwargs):
+        """
+        功能：读取实测数据，包括风场，温度和气压
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        print('读取实测数据文件：{}'.format(self.filename))
+        site_data = pd.read_excel(self.data_path, sheet_name='wind', *args, **kwargs)
+        station = self.data_path.split('\\')[-1][0:-5]
+        time_str = site_data['time'].astype(str)
+        time = [datetime.strptime(x, '%Y%m%d%H') for x in time_str]
+        time_stamp = pltdate.date2num(time)
+        if 'wind' in self.variables:
+            site_data = pd.read_excel(self.data_path, sheet_name='wind')
+            wind_spd = site_data['wind_spd'].to_numpy()
+            wind_dir = site_data['wind_dir'].to_numpy()
+            setattr(self.data, 'wind_spd', wind_spd)
+            setattr(self.data, 'wind_dir', wind_dir)
+        if 'temp' in self.variables:
+            site_data = pd.read_excel(self.data_path, sheet_name='temp')
+            temp = site_data['temp'].to_numpy()
+            max_temp = site_data['max_temp'].to_numpy()
+            min_temp = site_data['min_temp'].to_numpy()
+            setattr(self.data, 'temp', temp)
+            setattr(self.data, 'max_temp', max_temp)
+            setattr(self.data, 'min_temp', min_temp)
+        if 'pressure' in self.variables:
+            site_data = pd.read_excel(self.data_path, sheet_name='pressure')
+            pressure = site_data['pressure'].to_numpy()
+            max_pressure = site_data['max_pressure'].to_numpy()
+            min_pressure = site_data['min_pressure'].to_numpy()
+            setattr(self.data, 'pressure', pressure)
+            setattr(self.data, 'max_pressure', max_pressure)
+            setattr(self.data, 'min_pressure', min_pressure)
+        setattr(self.data, 'station', station)
+        setattr(self.data, 'time', time_stamp)

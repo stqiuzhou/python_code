@@ -11,14 +11,16 @@ from .utily import PassiveStore
 from datetime import datetime
 from scipy.interpolate import griddata, interp1d
 
+
 class FvcomPrep(Grid):
 
-    def __init__(self, data_path=None, **kwargs):
+    def __init__(self, data_path=None):
         if data_path is not None:
             super().__init__(data_path)
 
     def interp_temp_spatial(self, perp_lon, perp_lat, perp_time, perp_value,
-                            interp_lon, interp_lat, interp_time, time_single=False):
+                            interp_lon, interp_lat, interp_time,
+                            time_single=False, regular=True):
         """
         对时空方向分别进行插值
         :param perp_data: 插值所用的数据，包括lon，lat，time，values
@@ -26,14 +28,23 @@ class FvcomPrep(Grid):
         :return: interped_data: 插值结果
         """
         # 先对空间进行插值
-        X, Y = np.meshgrid(perp_lon, perp_lat)
+
         perp_time_num = len(perp_time)
         interp_spatial_num = len(interp_lon)
         interped_data_time = np.ones([perp_time_num, interp_spatial_num])
-        for itime in range(perp_time_num):
-            interped_tmp = griddata((X.ravel(), Y.ravel()), perp_value[itime, :, :].ravel(),
-                                    (interp_lon, interp_lat))
-            interped_data_time[itime, :] = interped_tmp
+        if regular:
+            X, Y = np.meshgrid(perp_lon, perp_lat)
+            for itime in range(perp_time_num):
+                interped_tmp = griddata((X.ravel(), Y.ravel()),
+                                        perp_value[itime, :, :].ravel(),
+                                        (interp_lon, interp_lat))
+                interped_data_time[itime, :] = interped_tmp
+        else:
+            X, Y = perp_lon, perp_lat
+            for itime in range(perp_time_num):
+                interped_tmp = griddata((X, Y), perp_value[itime, :],
+                                        (interp_lon, interp_lat))
+                interped_data_time[itime, :] = interped_tmp
         # 再对时间进行插值
         if time_single:
             interped_data = np.ones(interp_spatial_num)
@@ -45,7 +56,7 @@ class FvcomPrep(Grid):
                 interped_tmp = func(interp_time[ilon])
                 interped_data[ilon] = interped_tmp
             else:
-                interped_tmp = func(interp_time)
+                interped_tmp = func(interp_time[ilon])
                 interped_data[:, ilon] = interped_tmp
         return interped_data
 
@@ -65,19 +76,22 @@ class FvcomPrep(Grid):
         for i in range(time_length):
             LON, LAT = np.meshgrid(data.lon, data.lat)
             if 'u10' in data:
-                uwind_tmp = griddata((LON.ravel(), LAT.ravel()), data.u10[i, :, :].ravel(),
+                uwind_tmp = griddata((LON.ravel(), LAT.ravel()),
+                                     data.u10[i, :, :].ravel(),
                                      (self.lonc, self.latc))
                 if len(np.argwhere(np.isnan(uwind_tmp))) > 0:
                     raise ValueError('存在NAN值')
                 uwnd_final[i, :] = uwind_tmp
             if 'v10' in data:
-                vwind_tmp = griddata((LON.ravel(), LAT.ravel()), data.v10[i, :, :].ravel(),
+                vwind_tmp = griddata((LON.ravel(), LAT.ravel()),
+                                     data.v10[i, :, :].ravel(),
                                      (self.lonc, self.latc))
                 if len(np.argwhere(np.isnan(vwind_tmp))) > 0:
                     raise ValueError('存在NAN值')
                 vwnd_final[i, :] = vwind_tmp
             if 'slp' in data:
-                slf_tmp = griddata((LON.ravel(), LAT.ravel()), data.slp[i, :, :].ravel(),
+                slf_tmp = griddata((LON.ravel(), LAT.ravel()),
+                                   data.slp[i, :, :].ravel(),
                                    (self.lon, self.lat))
                 if len(np.argwhere(np.isnan(slf_tmp))) > 0:
                     raise ValueError('存在NAN值')
@@ -86,7 +100,7 @@ class FvcomPrep(Grid):
         setattr(forcing_data, 'vwnd', vwnd_final)
         setattr(forcing_data, 'slp', slp_final)
         t_end = datetime.now()
-        print("插值共花了{:d}秒".format((t_end-t_start).seconds))
+        print("插值共花了{:d}秒".format((t_end - t_start).seconds))
         return forcing_data
 
     def write_obc_nc(self, ncfile, ptime, zeta, *args, **kwargs):
@@ -106,16 +120,18 @@ class FvcomPrep(Grid):
         # 定义维度
         dims = {'nobc': self.obc, 'time': 0, 'DateStrLen': 26}
 
-        with WriteForcing(ncfile, dims, globle_attributes=globals, format='NETCDF3_64BIT') as obc_ncfile:
-            atts = {'long_name': 'Open Boundary Node Number', 'grid': 'obc_grid'}
-            obc_ncfile.add_variable('obc_nodes', self.open_boundary_nodes + 1, ['nobc'],
+        with WriteForcing(ncfile, dims, globle_attributes=globals,
+                          format='NETCDF3_64BIT') as obc_ncfile:
+            atts = {'long_name': 'Open Boundary Node Number',
+                    'grid': 'obc_grid'}
+            obc_ncfile.add_variable('obc_nodes', self.open_boundary_nodes + 1,
+                                    ['nobc'],
                                     attributes=atts, format='i')
             # 写入时间
             obc_ncfile.write_fvcom_time(ptime)
             atts = {'long_name': 'Open Boundary Elevation', 'units': 'meters'}
             obc_ncfile.add_variable('elevation', zeta, ['time', 'nobc'],
                                     attributes=atts)
-
 
     def write_surface_forcing(self, ncfile, ptime, forcing_data, **kwargs):
         """
@@ -131,7 +147,8 @@ class FvcomPrep(Grid):
                    'title': "FVCOM Grid Forcing Data file",
                    'institution': "State Key Laboratory of Satellite Ocean Environment Dynamics, SIO",
                    'source': "FVCOM grid (unstructured) surface forcing",
-                   'history': "File created using {} with write_surface_forcing from python".format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                   'history': "File created using {} with write_surface_forcing from python".format(
+                       datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
                    'filename': str(ncfile),
                    'references': "http://fvcom.smast.umassd.edu, http://codfish.smast.umassd.edu",
                    'Conventions': "CF-1.0"}
@@ -139,7 +156,8 @@ class FvcomPrep(Grid):
         dims = {'nele': self.nele, 'node': self.node, 'three': 3,
                 'time': 0, 'DateStrLen': 26, 'scalar': 1}
 
-        with WriteForcing(ncfile, dims, globle_attributes=globals, format='NETCDF3_64BIT') as surf_ncfile:
+        with WriteForcing(ncfile, dims, globle_attributes=globals,
+                          format='NETCDF3_64BIT') as surf_ncfile:
             # 写入网格
             print('写入网格中……')
             grid = Grid(self.grid_path)
@@ -154,7 +172,8 @@ class FvcomPrep(Grid):
                         'units': 'm/s',
                         'gird': 'fvcom_grid',
                         'type': 'data'}
-                surf_ncfile.add_variable('uwind_speed', forcing_data.uwnd, ['time', 'nele'],
+                surf_ncfile.add_variable('uwind_speed', forcing_data.uwnd,
+                                         ['time', 'nele'],
                                          attributes=atts)
             if 'vwnd' in forcing_data:
                 atts = {'long_name': 'Northward Wind Speed',
@@ -162,7 +181,8 @@ class FvcomPrep(Grid):
                         'units': 'm/s',
                         'gird': 'fvcom_grid',
                         'type': 'data'}
-                surf_ncfile.add_variable('vwind_speed', forcing_data.vwnd, ['time', 'nele'],
+                surf_ncfile.add_variable('vwind_speed', forcing_data.vwnd,
+                                         ['time', 'nele'],
                                          attributes=atts)
             if 'slp' in forcing_data:
                 atts = {'long_name': 'Surface air pressure',
@@ -170,7 +190,8 @@ class FvcomPrep(Grid):
                         'gird': 'fvcom_grid',
                         'coordinate': self.nativeCoords,
                         'type': 'data'}
-                surf_ncfile.add_variable('air_pressure', forcing_data.slp, ['time', 'node'],
+                surf_ncfile.add_variable('air_pressure', forcing_data.slp,
+                                         ['time', 'node'],
                                          attributes=atts)
 
 
@@ -196,7 +217,8 @@ class WriteForcing(object):
             for attribute in globle_attributes:
                 setattr(self.nc, attribute, globle_attributes[attribute])
 
-    def add_variable(self, name, data, dimensions, attributes=None, format='f4'):
+    def add_variable(self, name, data, dimensions, attributes=None,
+                     format='f4'):
         """
         功能： 添加变量到nc文件中
         :param name: 变量名
@@ -236,7 +258,8 @@ class WriteForcing(object):
         self.add_variable('nprocs', 1, ['scalar'], attributes=atts, format='i')
         # iint
         atts = {'long_name': 'internal mode iteration number'}
-        self.add_variable('iint', np.arange(len(time)), ['time'], attributes=atts, format='i')
+        self.add_variable('iint', np.arange(len(time)), ['time'],
+                          attributes=atts, format='i')
         # time
         atts = {'long_name': 'time',
                 'units': 'days since 1858-11-17 00:00:00',
@@ -252,12 +275,14 @@ class WriteForcing(object):
         atts = {'units': 'msec since 00:00:00',
                 'time_zone': 'UTC',
                 'long_name': 'time'}
-        self.add_variable('Itime2', Itime2, ['time'], attributes=atts, format='i')
+        self.add_variable('Itime2', Itime2, ['time'], attributes=atts,
+                          format='i')
         # Times
         atts = {'long_name': 'Calendar Date',
                 'format': 'String: Calendar Time',
                 'time_zone': 'UTC'}
-        self.add_variable('Times', Times, ['time', 'DateStrLen'], format='c', attributes=atts)
+        self.add_variable('Times', Times, ['time', 'DateStrLen'], format='c',
+                          attributes=atts)
 
     def write_fvcom_grid(self, grid, native_coordinates='spherical', **kwargs):
         """
@@ -269,58 +294,64 @@ class WriteForcing(object):
         """
         print('正在写入网格数据……')
         if native_coordinates == 'spherical':
-            for iname in ['lat', 'lon', 'latc', 'lonc','nv']:
+            for iname in ['lat', 'lon', 'latc', 'lonc', 'nv']:
                 if iname == 'lat':
                     atts = {'long_name': 'longitude',
                             'units': 'degrees_east'}
-                    self.add_variable('lon', grid.lon, ['node'], format='f',attributes=atts)
+                    self.add_variable('lon', grid.lon, ['node'], format='f',
+                                      attributes=atts)
                 if iname == 'lon':
                     atts = {'long_name': 'latitude',
                             'units': 'degrees_north'}
-                    self.add_variable('lat', grid.lat, ['node'], format='f',attributes=atts)
+                    self.add_variable('lat', grid.lat, ['node'], format='f',
+                                      attributes=atts)
                 if iname == 'lonc':
                     atts = {'long_name': 'zonal longitude',
                             'units': 'degrees_east'}
-                    self.add_variable('lonc', grid.lonc, ['nele'], format='f', attributes=atts)
+                    self.add_variable('lonc', grid.lonc, ['nele'], format='f',
+                                      attributes=atts)
                 if iname == 'latc':
                     atts = {'long_name': 'zonal latitude',
                             'units': 'degrees_north'}
-                    self.add_variable('latc', grid.latc, ['nele'], format='f', attributes=atts)
+                    self.add_variable('latc', grid.latc, ['nele'], format='f',
+                                      attributes=atts)
                 if iname == 'nv':
                     atts = {'long_name': 'nodes surrounding element'}
                     # nv is is (three,nele), while mesh.nv is (nele,3)，should transpose it
-                    self.add_variable('nv', np.transpose(grid.nv), ['three', 'nele'], format='i', attributes=atts)
+                    self.add_variable('nv', np.transpose(grid.nv),
+                                      ['three', 'nele'], format='i',
+                                      attributes=atts)
         elif native_coordinates == 'cartesian':
-            for iname in ['x', 'y', 'xc', 'yc','nv']:
+            for iname in ['x', 'y', 'xc', 'yc', 'nv']:
                 if iname == 'x':
                     atts = {'long_name': 'nodal x-coordinate',
                             'units': 'meters'}
-                    self.add_variable('x', grid.x, ['node'], format='f',attributes=atts)
+                    self.add_variable('x', grid.x, ['node'], format='f',
+                                      attributes=atts)
                 if iname == 'y':
                     atts = {'long_name': 'nodal y-coordinate',
                             'units': 'meter'}
-                    self.add_variable('y', grid.y, ['node'], format='f',attributes=atts)
+                    self.add_variable('y', grid.y, ['node'], format='f',
+                                      attributes=atts)
                 if iname == 'xc':
                     atts = {'long_name': 'zonal x-coordinate',
                             'units': 'meters'}
-                    self.add_variable('xc', grid.xc, ['nele'], format='f', attributes=atts)
+                    self.add_variable('xc', grid.xc, ['nele'], format='f',
+                                      attributes=atts)
                 if iname == 'yc':
                     atts = {'long_name': 'zonal y-coordinate',
                             'units': 'meters'}
-                    self.add_variable('yc', grid.yc, ['nele'], format='f', attributes=atts)
+                    self.add_variable('yc', grid.yc, ['nele'], format='f',
+                                      attributes=atts)
                 if iname == 'nv':
                     atts = {'long_name': 'nodes surrounding element'}
                     # nv is is (three,nele), while mesh.nv is (nele,3)，should transpose it
-                    self.add_variable('nv', np.transpose(grid.nv), ['three', 'nele'], format='f', attributes=atts)
+                    self.add_variable('nv', np.transpose(grid.nv),
+                                      ['three', 'nele'], format='f',
+                                      attributes=atts)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.nc.close()
-
-
-
-
-
-
